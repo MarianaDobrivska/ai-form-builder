@@ -1,144 +1,196 @@
 # Project Overview
 
-## What We Are Building
+A deep reference for the AI Form Builder: what it does, how it's structured, the
+database, the API, and how data flows through the system. For setup and scripts
+see the [README](../README.md); for language patterns see
+[typescript-features.md](./typescript-features.md).
 
-**AI Form Builder** — a web app where:
-1. A user describes a form in plain language ("I need a job application form")
-2. Claude AI generates the form fields
-3. The user can share the form, collect responses, and view results
+## What it is
 
----
+A web app that turns a plain-language description into a working form:
 
-## Tech Stack
+1. A user describes a form on `/builder` ("a contact form with name, email, and a message").
+2. Claude generates the field definitions.
+3. The user previews/tests the form and saves it.
+4. The saved form gets a public URL where anyone can fill it in.
+5. Responses are collected and shown in a results table.
 
-| Layer | Technology | Why |
+## Tech stack
+
+| Layer | Technology | Notes |
 |---|---|---|
-| Framework | Next.js 16, App Router | Server components, file-based routing, API routes in one project |
-| Language | TypeScript (strict mode) | Catches bugs at compile time, makes the AI response parsing safe |
-| Database | Prisma 7 + SQLite | Simple file-based DB, zero config for local dev |
-| AI | Anthropic Claude API (`claude-haiku-4-5`) | Fast and cheap for structured generation |
-| UI | Tailwind CSS + shadcn/ui | Utility-first CSS with ready-made accessible components |
-| Validation | Zod | Schema-first validation that generates TypeScript types |
+| Framework | Next.js 16 (App Router) | Server Components, file-based routing, Route Handlers |
+| Language | TypeScript (strict) | See [typescript-features.md](./typescript-features.md) |
+| Database | Prisma 7 + SQLite | File-based, via the `better-sqlite3` driver adapter |
+| AI | Anthropic Claude (`claude-haiku-4-5`) | Fast/cheap structured generation |
+| UI | Tailwind CSS + shadcn/ui (Base UI) | Utility CSS + accessible primitives |
+| Validation | Zod | Schema-first; static types via `z.infer` |
 
----
+## Architecture
 
-## Folder Structure
-
-```
-ai-form-builder/
-├── prisma/
-│   ├── schema.prisma          ← database models
-│   └── migrations/            ← auto-generated SQL migration history
-├── prisma.config.ts           ← Prisma 7 config (DB URL, migration path)
-├── src/
-│   ├── app/                   ← Next.js App Router pages + API routes
-│   │   ├── api/
-│   │   │   ├── forms/route.ts         GET all / POST create
-│   │   │   ├── forms/[id]/route.ts    GET one / DELETE
-│   │   │   ├── generate/route.ts      POST → AI generates fields
-│   │   │   └── submissions/route.ts   POST → save a form response
-│   │   ├── forms/
-│   │   │   ├── page.tsx               list all forms
-│   │   │   ├── [id]/page.tsx          fill in a form
-│   │   │   └── [id]/results/page.tsx  view submissions
-│   │   ├── builder/page.tsx           ← AI form builder UI
-│   │   ├── layout.tsx
-│   │   ├── page.tsx
-│   │   └── generated/prisma/          ← auto-generated Prisma client (don't edit)
-│   ├── types/                 ← pure TypeScript types, no logic
-│   │   ├── field.types.ts     ← FormField discriminated union
-│   │   ├── form.types.ts      ← Form, DTOs
-│   │   ├── api.types.ts       ← ApiResponse<T>
-│   │   └── index.ts           ← barrel re-export
-│   ├── lib/                   ← business logic, no React
-│   │   ├── ai/generate-form.ts        ← calls Claude API
-│   │   ├── db/
-│   │   │   ├── prisma.ts              ← singleton PrismaClient
-│   │   │   └── forms.repository.ts    ← DB queries
-│   │   └── validators/
-│   │       ├── field.validators.ts    ← Zod schemas for fields
-│   │       └── form.validators.ts     ← Zod schema for create-form body
-│   ├── components/
-│   │   ├── fields/            ← one component per field kind
-│   │   │   ├── TextField.tsx
-│   │   │   ├── NumberField.tsx
-│   │   │   ├── SelectField.tsx
-│   │   │   ├── CheckboxField.tsx
-│   │   │   ├── DateField.tsx
-│   │   │   └── index.ts       ← barrel export
-│   │   ├── builder/
-│   │   │   ├── FormBuilder.tsx
-│   │   │   └── FieldPreview.tsx
-│   │   └── ui/                ← shadcn/ui components (auto-generated)
-│   └── hooks/
-│       ├── useFormBuilder.ts
-│       └── useFormSubmission.ts
-```
-
----
-
-## Architecture: Layer Rules
-
-The codebase is split into strict layers. Imports only flow **downward** — a lower layer never knows about a higher one.
+The code is split into strict layers; imports flow **downward only**, so a lower
+layer never depends on a higher one.
 
 ```
-types/       ← no imports from anywhere in the project
-    ↓
-lib/         ← imports from types/  only
-    ↓
-components/  ← imports from types/ and lib/
-    ↓
-app/api/     ← imports from lib/ only (thin HTTP adapter)
-app/pages/   ← imports from components/ and lib/
+types/                  pure TypeScript types — no logic, no imports from the app
+   ↓
+lib/                    business logic — no React, no HTTP, no Next.js
+   ↓
+components/ + hooks/    React — import from lib/ and types/
+   ↓
+app/                    pages + thin API routes that delegate to lib/
 ```
 
-**Why this matters:** If `lib/` imported from `app/`, you'd create a circular dependency and mix HTTP concerns into business logic. The strict direction means every layer is independently testable.
+Why it matters: business logic in `lib/` stays free of HTTP and React, so it's
+independently testable and reusable, and there are no circular dependencies.
+API routes are deliberately thin — parse → validate → call `lib/` → shape a response.
 
----
+Two cross-cutting rules:
 
-## Data Flow: Generating a Form
+- **Every external input is `unknown` first**, then validated with Zod or a type
+  guard before use (request bodies, AI output, DB JSON, fetch responses).
+- **Every API route returns `ApiResponse<T>`**: `{ ok: true, data } | { ok: false, error, code }`.
 
-```
-Browser              Next.js server          Anthropic API
-  │                       │                       │
-  │  POST /api/generate   │                       │
-  │  { prompt: "..." }    │                       │
-  │──────────────────────►│                       │
-  │                       │  messages.create()    │
-  │                       │──────────────────────►│
-  │                       │                       │  generates JSON
-  │                       │◄──────────────────────│
-  │                       │  parse unknown → type guard → FormField[]
-  │◄──────────────────────│
-  │  { ok: true, data: FormField[] }
-```
-
-## Data Flow: Submitting a Form
+## Project structure
 
 ```
-Browser              Next.js server          SQLite DB
-  │                       │                       │
-  │  POST /api/submissions │                      │
-  │  { formId, data }     │                       │
-  │──────────────────────►│                       │
-  │                       │  prisma.submission.create()
-  │                       │──────────────────────►│
-  │◄──────────────────────│◄──────────────────────│
-  │  { ok: true, data: null }
+src/
+├── app/
+│   ├── api/
+│   │   ├── generate/route.ts          POST → AI generates fields
+│   │   ├── forms/route.ts             GET list · POST create
+│   │   ├── forms/[id]/route.ts        GET one · DELETE (stubs)
+│   │   └── submissions/route.ts       POST → save a response
+│   ├── builder/page.tsx               generate + preview + save
+│   ├── forms/page.tsx                 browse saved forms
+│   ├── forms/[id]/page.tsx            public fillable form
+│   ├── forms/[id]/results/page.tsx    responses table
+│   ├── layout.tsx                     root layout + SiteHeader
+│   └── page.tsx                       home
+├── components/
+│   ├── fields/   TextField, NumberField, SelectField, CheckboxField, DateField,
+│   │             FieldInput (the exhaustive renderer), index.ts
+│   ├── builder/  FormBuilder (interactive preview)
+│   ├── form/     FormFiller, CopyLinkButton
+│   ├── layout/   SiteHeader (home + back + nav)
+│   └── ui/       button (shadcn/Base UI)
+├── hooks/        useFormBuilder, useSaveForm, useFormSubmission
+├── lib/
+│   ├── ai/generate-form.ts            Claude call, safe parsing, FormGenerationError
+│   ├── db/
+│   │   ├── prisma.ts                  singleton PrismaClient (better-sqlite3 adapter)
+│   │   ├── forms.repository.ts        getAllForms, getFormById, createForm
+│   │   └── submissions.repository.ts  createSubmission, getSubmissions
+│   ├── validators/
+│   │   ├── field.validators.ts        Zod field schemas + isFormFieldArray guard
+│   │   ├── form.validators.ts         createFormSchema + CreateFormInput
+│   │   └── format-zod-error.ts        ZodError → readable string
+│   └── utils.ts                       cn(), isRecord()
+└── types/        field.types, form.types, api.types, index (barrel)
 ```
 
----
+## Database
 
-## Key Design Decisions
+SQLite via Prisma 7. Schema (`prisma/schema.prisma`):
 
-### 1. SQLite as JSON store for fields
-Form fields are stored as a JSON string (`fields String @default("[]")`). This avoids a complex relational schema for what is essentially a dynamic, schema-less structure. When reading, you parse the string; when writing, you serialize to JSON.
+```prisma
+model Form {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  fields      String       @default("[]")   // FormField[] serialized as JSON
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  submissions Submission[]
+}
 
-### 2. Prisma 7 driver adapter
-Prisma 7 removed built-in database drivers. You must now provide a driver adapter. For SQLite we use `@prisma/adapter-better-sqlite3`. The `PrismaClient` is created with `new PrismaClient({ adapter })` instead of the older zero-argument form.
+model Submission {
+  id        String   @id @default(cuid())
+  formId    String
+  data      String                          // Record<string, unknown> as JSON
+  createdAt DateTime @default(now())
+  form      Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
+}
+```
 
-### 3. Global singleton for PrismaClient
-Next.js in dev mode hot-reloads modules, which would create a new `PrismaClient` on every file change and exhaust the SQLite connection pool. The singleton pattern (`globalForPrisma.prisma ?? makePrisma()`) stores the instance on `globalThis` so it survives hot reloads.
+Design decisions:
 
-### 4. `unknown` over `any` for AI responses
-The Claude API returns `string`, which we `JSON.parse()` into `unknown`. We then narrow it with type guards before treating it as `FormField[]`. This forces the error path to be explicit rather than silently propagating bad data.
+- **Fields stored as JSON, not relational rows.** A form's fields are a dynamic,
+  schema-less list, so they're serialized into the `fields` text column. The
+  repositories serialize on write (`JSON.stringify`) and parse + validate on read
+  (`isFormFieldArray` / `isRecord`), tolerating bad data by falling back to `[]`/`{}`.
+- **Submission `data` is JSON too**, a `field.id → value` map, validated for shape
+  (`{ formId, data }`) on write. Per-field answer validation is currently
+  client-side in `FormFiller`.
+- **Cascade delete.** Deleting a `Form` removes its `Submission`s
+  (`onDelete: Cascade`).
+- **Prisma 7 driver adapter.** Prisma 7 has no built-in drivers; we pass
+  `@prisma/adapter-better-sqlite3` to `new PrismaClient({ adapter })`
+  (`src/lib/db/prisma.ts`).
+- **Client singleton.** The `PrismaClient` is cached on `globalThis` so dev-mode hot
+  reloads don't open a new connection on every change.
+- The generated client is emitted to `src/generated/prisma` (git-ignored).
+  Run `npx prisma migrate dev` after schema changes; `npx prisma studio` for a GUI.
+
+## API
+
+All routes are Next.js Route Handlers under `src/app/api/` and return `ApiResponse<T>`.
+
+| Method & path | Body | Success | Errors |
+|---|---|---|---|
+| `POST /api/generate` | `{ prompt }` | `200` `FormField[]` | `400` invalid input · `429/502/503` AI failures · `500` |
+| `GET /api/forms` | — | `200` `FormPreview[]` | `500` |
+| `POST /api/forms` | `{ title, description?, fields }` | `201` `FormPreview` | `400` invalid input · `500` |
+| `GET /api/forms/[id]` | — | *(stub)* | `501` |
+| `DELETE /api/forms/[id]` | — | *(stub)* | `501` |
+| `POST /api/submissions` | `{ formId, data }` | `201` `null` | `400` invalid input · `404` form not found · `500` |
+
+Validation failures return the specific Zod message (e.g. `prompt: Too small …`)
+via `formatZodError`. AI failures are categorized into safe, user-facing messages
+by `FormGenerationError` (rate-limited, unauthenticated, unreachable, invalid JSON,
+malformed fields) with appropriate status codes.
+
+## Data flows
+
+**Generate** — `/builder` → `useFormBuilder`:
+
+```
+prompt → POST /api/generate → generateForm()
+  → Claude messages.create (system prompt forces raw JSON)
+  → strip code fence → JSON.parse → isFormFieldArray guard → FormField[]
+  → { ok: true, data } → preview
+```
+
+**Save** — `useSaveForm`:
+
+```
+{ title, fields } → POST /api/forms → createFormSchema.parse
+  → createForm() (JSON.stringify fields) → 201 → redirect to /forms
+```
+
+**Browse** — `/forms` is a Server Component that calls `getAllForms()` directly
+(no API round-trip) and streams the list behind a `<Suspense>` skeleton.
+
+**Fill & submit** — `/forms/[id]` (Server Component, `notFound()` on bad id) renders
+`FormFiller`:
+
+```
+answers → useFormSubmission → POST /api/submissions
+  → form existence check (404 if missing) → createSubmission() → 201 → thank-you
+```
+
+**Results** — `/forms/[id]/results` fetches the form + `getSubmissions()` in parallel
+and renders a table: a timestamp column plus one column per field.
+
+## Pages
+
+| Route | Type | Purpose |
+|---|---|---|
+| `/` | Server | Landing page |
+| `/builder` | Client | Generate, preview/test, and save a form |
+| `/forms` | Server (streamed) | Browse saved forms; links to each form + its responses |
+| `/forms/[id]` | Server | Public fillable form with a copy-link share button |
+| `/forms/[id]/results` | Server | Table of all responses |
+
+A sticky `SiteHeader` (in the root layout) provides Home, a contextual Back button,
+and links to the forms list and builder on every page.
