@@ -35,16 +35,25 @@ async function FormList() {
   return (
     <ul className="flex flex-col gap-3">
       {forms.map((form) => (
-        <li key={form.id}>
+        <li
+          key={form.id}
+          className="flex items-center justify-between gap-4 rounded-lg border p-4"
+        >
           <Link
             href={`/forms/${form.id}`}
-            className="flex items-center justify-between gap-4 rounded-lg border p-4 transition-colors hover:bg-muted"
+            className="flex min-w-0 flex-col hover:underline"
           >
             <span className="truncate font-medium">{form.title}</span>
-            <span className="shrink-0 text-sm text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               {form.fieldCount} {form.fieldCount === 1 ? 'field' : 'fields'} ·{' '}
               {formatDate(form.createdAt)}
             </span>
+          </Link>
+          <Link
+            href={`/forms/${form.id}/results`}
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            Responses
           </Link>
         </li>
       ))}

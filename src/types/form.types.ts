@@ -12,6 +12,13 @@ export type Form = {
 export type FormPreview = Pick<Form, 'id' | 'title' | 'createdAt'> & { fieldCount: number }
 export type FormDraft = Partial<Omit<Form, 'id' | 'createdAt' | 'updatedAt'>>
 
+// A single recorded response to a form. `data` maps field id → submitted value.
+export type Submission = {
+  id: string
+  data: Record<string, unknown>
+  createdAt: Date
+}
+
 export type CreateFormDTO = { title: string; description?: string; fields: FormField[] }
 export type FormResponseDTO = { data: FormPreview[]; total: number; page: number }
 
