@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { FormField } from '@/types'
 
 const baseFieldSchema = z.object({
   id: z.string(),
@@ -20,3 +21,9 @@ export const formFieldSchema = z.discriminatedUnion('kind', [
   checkboxFieldSchema,
   dateFieldSchema,
 ])
+
+// Validate an unknown value (parsed JSON, network payload, DB column) as
+// FormField[]. A type predicate keeps callers `as`-free while still narrowing.
+export function isFormFieldArray(value: unknown): value is FormField[] {
+  return z.array(formFieldSchema).safeParse(value).success
+}

@@ -1,11 +1,8 @@
 import Anthropic, { APIError } from '@anthropic-ai/sdk'
-import { z } from 'zod'
-import { formFieldSchema } from '@/lib/validators/field.validators'
+import { isFormFieldArray } from '@/lib/validators/field.validators'
 import type { FormField } from '@/types'
 
 const client = new Anthropic()
-
-const aiResponseSchema = z.array(formFieldSchema)
 
 const SYSTEM_PROMPT = `You generate form schemas. Respond with ONLY a raw JSON array of field objects — no markdown, no code fences, no explanation.
 Each field has:
@@ -25,12 +22,6 @@ export class FormGenerationError extends Error {
     this.name = 'FormGenerationError'
     this.status = status
   }
-}
-
-// Treat the AI response as `unknown` and narrow it through a runtime check —
-// never trust the model's JSON directly (see architecture.md).
-function isFormFieldArray(value: unknown): value is FormField[] {
-  return aiResponseSchema.safeParse(value).success
 }
 
 // Models often wrap JSON in a markdown code fence (```json ... ```); strip it

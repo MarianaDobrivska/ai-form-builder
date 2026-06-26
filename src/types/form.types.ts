@@ -12,7 +12,7 @@ export type Form = {
 export type FormPreview = Pick<Form, 'id' | 'title' | 'createdAt'> & { fieldCount: number }
 export type FormDraft = Partial<Omit<Form, 'id' | 'createdAt' | 'updatedAt'>>
 
-export type CreateFormDTO = { title: string; description?: string; prompt: string }
+export type CreateFormDTO = { title: string; description?: string; fields: FormField[] }
 export type FormResponseDTO = { data: FormPreview[]; total: number; page: number }
 
 // Async state of an AI form-generation request. Discriminated on `status` so

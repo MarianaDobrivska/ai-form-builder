@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createFormSchema } from '@/lib/validators/form.validators'
-import { getAllForms } from '@/lib/db/forms.repository'
+import { formatZodError } from '@/lib/validators/format-zod-error'
+import { createForm, getAllForms } from '@/lib/db/forms.repository'
 import type { ApiResponse, FormPreview } from '@/types'
 
 export async function GET(): Promise<NextResponse<ApiResponse<FormPreview[]>>> {
@@ -17,11 +18,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
   try {
     const raw: unknown = await request.json()
     const body = createFormSchema.parse(raw)
-    void body
-    return NextResponse.json({ ok: false, error: 'Not implemented', code: 501 }, { status: 501 })
+    const form = await createForm(body)
+    return NextResponse.json({ ok: true, data: form }, { status: 201 })
   } catch (error) {
     if (error instanceof z.ZodError)
-      return NextResponse.json({ ok: false, error: 'Invalid input', code: 400 }, { status: 400 })
+      return NextResponse.json({ ok: false, error: formatZodError(error), code: 400 }, { status: 400 })
     return NextResponse.json({ ok: false, error: 'Internal error', code: 500 }, { status: 500 })
   }
 }
