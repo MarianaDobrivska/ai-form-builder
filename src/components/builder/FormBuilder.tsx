@@ -6,8 +6,9 @@ import { FieldInput, type FieldValue } from '@/components/fields/FieldInput'
 
 type Props = { fields: FormField[] }
 
-// Read-only-ish live preview of a generated form. Holds local values so the
-// inputs are interactive, but does not submit anything.
+// Interactive preview so the user can try the generated form out. The entered
+// values are local-only — saving persists the form's structure, not these
+// test answers.
 export function FormBuilder({ fields }: Props) {
   const [values, setValues] = useState<Record<string, FieldValue>>({})
 

@@ -15,6 +15,12 @@ export default function BuilderPage() {
   const loading = state.status === 'loading'
   const saving = saveState.status === 'saving'
 
+  function handleGenerate() {
+    // Prefill the title from the prompt so the form can be saved in one click.
+    setTitle((current) => current || prompt.trim())
+    void generate(prompt)
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-6 py-16">
       <header className="flex flex-col gap-2">
@@ -33,7 +39,7 @@ export default function BuilderPage() {
           className="w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         />
         <Button
-          onClick={() => generate(prompt)}
+          onClick={handleGenerate}
           disabled={loading || prompt.trim() === ''}
           className="self-start"
         >
@@ -47,8 +53,12 @@ export default function BuilderPage() {
 
       {state.status === 'success' && (
         <section className="flex flex-col gap-6 border-t pt-8">
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
             <h2 className="text-lg font-medium">Preview</h2>
+            <p className="text-sm text-muted-foreground">
+              Preview and test your form below. Saving stores the form so you can
+              reuse and share it later.
+            </p>
             <FormBuilder fields={state.fields} />
           </div>
 
@@ -64,8 +74,8 @@ export default function BuilderPage() {
               className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             />
             <Button
-              onClick={() => save(title, state.fields)}
-              disabled={saving || title.trim() === ''}
+              onClick={() => save(title.trim() || 'Untitled form', state.fields)}
+              disabled={saving}
               className="self-start"
             >
               {saving ? 'Saving…' : 'Save form'}
