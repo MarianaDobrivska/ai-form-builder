@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { generateForm, FormGenerationError } from "@/lib/ai/generate-form";
+import { formatZodError } from "@/lib/validators/format-zod-error";
 import type { ApiResponse, FormField } from "@/types";
 
 const generateSchema = z.object({ prompt: z.string().min(1) });
@@ -16,7 +17,7 @@ export async function POST(
   } catch (error) {
     if (error instanceof z.ZodError)
       return NextResponse.json(
-        { ok: false, error: "Invalid input", code: 400 },
+        { ok: false, error: formatZodError(error), code: 400 },
         { status: 400 }
       );
     if (error instanceof FormGenerationError)
